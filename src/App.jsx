@@ -1,19 +1,11 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
-import CustomEase from "gsap/CustomEase";
-import Lenis from "lenis";
-import SoundManager from "./utils/SoundManager";
-import "./index.css";
+import "./index.css"; // <-- styles moved here
 
-gsap.registerPlugin(ScrollTrigger, CustomEase);
-CustomEase.create("customEase", "M0,0 C0.86,0 0.07,1 1,1");
+gsap.registerPlugin(ScrollTrigger);
 
-// ---------- Constants ----------
-const IMAGES = Array.from({ length: 10 }, (_, i) =>
-  `https://assets.codepen.io/7558/flame-glow-blur-${String(i + 1).padStart(3, "0")}.jpg`
-);
-const ARTISTS = [
+const ITEMS = [
   "Silence",
   "Meditation",
   "Intuition",
@@ -23,8 +15,9 @@ const ARTISTS = [
   "Curiosity",
   "Patience",
   "Surrender",
-  "Simplicity",
+  "Simplicity"
 ];
+
 const CATEGORIES = [
   "Reduction",
   "Essence",
@@ -35,332 +28,336 @@ const CATEGORIES = [
   "Clarity",
   "Emptiness",
   "Awareness",
-  "Minimalism",
-];
-const FEATURED = [
-  "Creative Elements",
-  "Inner Stillness",
-  "Deep Knowing",
-  "True Expression",
-  "Now Moment",
-  "Deep Attention",
-  "Open Exploration",
-  "Calm Waiting",
-  "Let Go Control",
-  "Pure Essence",
+  "Minimalism"
 ];
 
-// ---------- Component ----------
+const BACKGROUNDS = [
+  "https://assets.codepen.io/7558/flame-glow-blur-001.jpg",
+  "https://assets.codepen.io/7558/flame-glow-blur-002.jpg",
+  "https://assets.codepen.io/7558/flame-glow-blur-003.jpg",
+  "https://assets.codepen.io/7558/flame-glow-blur-004.jpg",
+  "https://assets.codepen.io/7558/flame-glow-blur-005.jpg",
+  "https://assets.codepen.io/7558/flame-glow-blur-006.jpg",
+  "https://assets.codepen.io/7558/flame-glow-blur-007.jpg",
+  "https://assets.codepen.io/7558/flame-glow-blur-008.jpg",
+  "https://assets.codepen.io/7558/flame-glow-blur-009.jpg",
+  "https://assets.codepen.io/7558/flame-glow-blur-010.jpg"
+];
+
+// Lightweight SoundManager used in the original
+class SoundManager {
+  constructor() {
+    this.sounds = {};
+    this.isEnabled = false;
+  }
+
+  load(name, url, volume = 0.3) {
+    const audio = new Audio(url);
+    audio.preload = "auto";
+    audio.volume = volume;
+    this.sounds[name] = audio;
+  }
+
+  enable() {
+    this.isEnabled = true;
+  }
+
+  play(name, delay = 0) {
+    if (!this.isEnabled) return;
+    const s = this.sounds[name];
+    if (!s) return;
+    if (delay > 0) return setTimeout(() => this.play(name, 0), delay);
+    s.currentTime = 0;
+    s.play().catch(() => {});
+  }
+}
+
 export default function App() {
-  const soundManager = useRef(new SoundManager()).current;
+  const containerRef = useRef(null);
+  const fixedContainerRef = useRef(null);
+  const [loaded, setLoaded] = useState(false);
+  const [current, setCurrent] = useState(0);
   const lenisRef = useRef(null);
+  const sectionPositionsRef = useRef([]);
+  const isSnappingRef = useRef(false);
+  const soundRef = useRef(null);
 
-  // ---- Unlock sound on first interaction ----
+  // prepare sound manager
   useEffect(() => {
-    const unlock = async () => {
-      await soundManager.enableAudio();
-      const btn = document.querySelector(".sound-toggle");
-      btn?.classList.remove("disabled");
-      btn?.classList.add("active");
-    };
+    soundRef.current = new SoundManager();
+    soundRef.current.load("hover", "https://assets.codepen.io/7558/click-reverb-001.mp3", 0.15);
+    soundRef.current.load("click", "https://assets.codepen.io/7558/shutter-fx-001.mp3", 0.3);
+    soundRef.current.load("textChange", "https://assets.codepen.io/7558/whoosh-fx-001.mp3", 0.3);
+  }, []);
 
-    ["click", "touchstart", "keydown"].forEach((evt) =>
-      document.addEventListener(evt, unlock, { once: true })
-    );
-
-    return () => {
-      ["click", "touchstart", "keydown"].forEach((evt) =>
-        document.removeEventListener(evt, unlock)
-      );
-    };
-  }, [soundManager]);
-
-  // ---- Main GSAP / Scroll logic ----
   useEffect(() => {
-    // ✅ Initialize Lenis (mobile safe)
-    const lenis = new Lenis({
-      duration: 1.2,
-      easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-      smooth: true,
-      smoothTouch: true,
-      touchMultiplier: 1.3,
-    });
+    let lenis;
+    let rafUpdate;
 
-    function raf(time) {
-      lenis.raf(time);
-      requestAnimationFrame(raf);
-    }
-    requestAnimationFrame(raf);
+    const init = async () => {
+      // dynamic import of Lenis to avoid SSR errors
+      const { default: Lenis } = await import("@studio-freight/lenis");
 
-    lenisRef.current = lenis;
+      lenis = new Lenis({
+        duration: 1.2,
+        easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+        direction: "vertical",
+        gestureDirection: "vertical",
+        smooth: true,
+        smoothTouch: false,
+        touchMultiplier: 2
+      });
+      lenisRef.current = lenis;
 
-    // ---- Loading animation ----
-    const overlay = document.getElementById("loading-overlay");
-    const counterEl = document.getElementById("loading-counter");
-    let count = 0;
-    const interval = setInterval(() => {
-      count += Math.random() * 3 + 1;
-      if (count >= 100) {
-        count = 100;
-        clearInterval(interval);
-        gsap.to(overlay, {
-          y: "-100%",
-          duration: 1.2,
-          ease: "power3.inOut",
-          delay: 0.3,
-          onComplete: () => {
-            overlay.style.display = "none";
-            gsap.utils.toArray(".artist").forEach((el, i) =>
-              gsap.to(el, {
-                opacity: 0.3,
-                y: 0,
-                delay: i * 0.06,
-                duration: 0.5,
-              })
-            );
-            gsap.utils.toArray(".category").forEach((el, i) =>
-              gsap.to(el, {
-                opacity: 0.3,
-                y: 0,
-                delay: 0.3 + i * 0.06,
-                duration: 0.5,
-              })
-            );
-          },
+      rafUpdate = (time) => lenis.raf(time * 1000);
+      gsap.ticker.add(rafUpdate);
+
+      // Wait a tick so layout is stable
+      setTimeout(setupScroll, 50);
+
+      function setupScroll() {
+        const fixedSectionEl = containerRef.current.querySelector(".fixed-section");
+        const fixedSectionTop = fixedSectionEl.offsetTop;
+        const fixedSectionHeight = fixedSectionEl.offsetHeight;
+        const sectionPositions = [];
+        for (let i = 0; i < 10; i++) {
+          sectionPositions.push(fixedSectionTop + (fixedSectionHeight * i) / 10);
+        }
+        sectionPositionsRef.current = sectionPositions;
+
+        // Main scroll trigger
+        ScrollTrigger.create({
+          trigger: ".fixed-section",
+          start: "top top",
+          end: "bottom bottom",
+          pin: ".fixed-container",
+          pinSpacing: true,
+          onUpdate: (self) => {
+            if (isSnappingRef.current) return;
+            const progress = self.progress;
+            const targetSection = Math.min(9, Math.floor(progress * 10));
+            if (targetSection !== current) {
+              // snap one step
+              const nextSection = current + (targetSection > current ? 1 : -1);
+              snapTo(nextSection);
+            }
+          }
+        });
+
+        // end-section trigger (blur & unpin)
+        ScrollTrigger.create({
+          trigger: ".end-section",
+          start: "top center",
+          end: "bottom bottom",
+          onUpdate: (self) => {
+            const footer = containerRef.current.querySelector("#footer");
+            const leftColumn = containerRef.current.querySelector("#left-column");
+            const rightColumn = containerRef.current.querySelector("#right-column");
+            const featured = containerRef.current.querySelector("#featured");
+            if (self.progress > 0.1) {
+              footer.classList.add("blur");
+              leftColumn.classList.add("blur");
+              rightColumn.classList.add("blur");
+              featured.classList.add("blur");
+            } else {
+              footer.classList.remove("blur");
+              leftColumn.classList.remove("blur");
+              rightColumn.classList.remove("blur");
+              featured.classList.remove("blur");
+            }
+          }
         });
       }
-      counterEl.textContent = `[${Math.floor(count)
-        .toString()
-        .padStart(2, "0")}]`;
-    }, 30);
 
-    // ---- Scroll logic variables ----
-    const backgrounds = document.querySelectorAll(".background-image");
-    const featuredContents = document.querySelectorAll(".featured-content");
-    const artists = document.querySelectorAll(".artist");
-    const categories = document.querySelectorAll(".category");
-    const currentSectionDisplay = document.getElementById("current-section");
-    const progressFill = document.getElementById("progress-fill");
+      const snapTo = (index) => {
+        if (index < 0 || index > 9 || index === current) return;
+        isSnappingRef.current = true;
+        changeSection(index);
+        const target = sectionPositionsRef.current[index];
+        lenis.scrollTo(target, { duration: 0.6, easing: (t) => 1 - Math.pow(1 - t, 3), lock: true, onComplete: () => {
+          isSnappingRef.current = false;
+        }});
+      };
 
-    let currentSection = 0;
-    let isAnimating = false;
-    let isSnapping = false;
+      const changeSection = (newIdx) => {
+        const prev = current;
+        setCurrent(newIdx);
+        // progress fill
+        const progressFill = containerRef.current.querySelector("#progress-fill");
+        if (progressFill) progressFill.style.width = `${(newIdx / 9) * 100}%`;
 
-    const fixedSectionEl = document.querySelector(".fixed-section");
-    const secTop = fixedSectionEl.offsetTop;
-    const secHeight = fixedSectionEl.offsetHeight;
-    const sectionPositions = Array.from({ length: 10 }, (_, i) =>
-      secTop + (secHeight * i) / 10
-    );
+        // animate backgrounds
+        const bgEls = containerRef.current.querySelectorAll(".background-image");
+        bgEls.forEach((bg, i) => {
+          bg.classList.remove("active", "previous");
+          if (i === newIdx) {
+            bg.classList.add("active");
+            gsap.to(bg, { opacity: 1, duration: 0.6 });
+          } else if (i === prev) {
+            bg.classList.add("previous");
+            gsap.to(bg, { opacity: 0, duration: 0.6 });
+          } else {
+            gsap.set(bg, { opacity: 0 });
+          }
+        });
 
-    const updateProgress = () => {
-      currentSectionDisplay.textContent = String(currentSection + 1).padStart(
-        2,
-        "0"
-      );
-      progressFill.style.width = `${(currentSection / 9) * 100}%`;
-    };
+        // artists & categories
+        const artists = containerRef.current.querySelectorAll(".artist");
+        const categories = containerRef.current.querySelectorAll(".category");
+        artists.forEach((a, i) => {
+          if (i === newIdx) a.classList.add("active"); else a.classList.remove("active");
+        });
+        categories.forEach((c, i) => {
+          if (i === newIdx) c.classList.add("active"); else c.classList.remove("active");
+        });
 
-    const changeSection = (newSection) => {
-      if (newSection === currentSection || isAnimating) return;
-      isAnimating = true;
-      const prev = currentSection;
-      currentSection = newSection;
-      updateProgress();
-      featuredContents[prev]?.classList.remove("active");
-      featuredContents[newSection]?.classList.add("active");
-      soundManager.play("textChange", 250);
+        // featured text simple word-animate
+        const featuredContents = containerRef.current.querySelectorAll(".featured-content");
+        featuredContents.forEach((fc, i) => {
+          if (i === newIdx) {
+            fc.classList.add("active");
+            gsap.fromTo(fc.querySelectorAll(".word"), { yPercent: 100, opacity: 0 }, { yPercent: 0, opacity: 1, stagger: 0.05, duration: 0.6 });
+          } else {
+            fc.classList.remove("active");
+            gsap.set(fc.querySelectorAll(".word"), { yPercent: 100, opacity: 0 });
+          }
+        });
 
-      backgrounds.forEach((bg, i) => {
-        bg.classList.remove("previous", "active");
-        if (i === newSection) {
-          bg.classList.add("active");
-          gsap.fromTo(
-            bg,
-            { clipPath: "inset(100% 0 0 0)" },
-            { clipPath: "inset(0 0 0 0)", duration: 0.64, ease: "customEase" }
-          );
-        } else if (i === prev) {
-          bg.classList.add("previous");
-          gsap.to(bg, {
-            opacity: 0,
-            duration: 0.32,
-            ease: "customEase",
-            onComplete: () => (isAnimating = false),
-          });
+        // play sound
+        if (soundRef.current) {
+          soundRef.current.play("textChange", 150);
         }
+      };
+
+      // Expose small API
+      window.__creative = { snapTo: (i) => { if (lenis) lenis.scrollTo(sectionPositionsRef.current[i]); } };
+
+      // click handlers for items
+      const artistEls = containerRef.current.querySelectorAll(".artist");
+      artistEls.forEach((el, idx) => {
+        el.addEventListener("click", (e) => {
+          e.preventDefault();
+          if (soundRef.current) {
+            soundRef.current.enable();
+            soundRef.current.play("click");
+          }
+          snapTo(idx);
+        });
+        el.addEventListener("mouseenter", () => {
+          if (soundRef.current) {
+            soundRef.current.enable();
+            soundRef.current.play("hover");
+          }
+        });
       });
 
-      artists.forEach((el, i) =>
-        gsap.to(el, { opacity: i === newSection ? 1 : 0.3, duration: 0.3 })
-      );
-      categories.forEach((el, i) =>
-        gsap.to(el, { opacity: i === newSection ? 1 : 0.3, duration: 0.3 })
-      );
-    };
-
-    const snapToSection = (idx) => {
-      if (idx < 0 || idx > 9 || idx === currentSection || isAnimating) return;
-      isSnapping = true;
-      changeSection(idx);
-      lenis.scrollTo(sectionPositions[idx], {
-        duration: 0.8,
-        easing: (t) => 1 - Math.pow(1 - t, 3),
-        lock: true,
-        onComplete: () => (isSnapping = false),
+      const categoryEls = containerRef.current.querySelectorAll(".category");
+      categoryEls.forEach((el, idx) => {
+        el.addEventListener("click", (e) => {
+          e.preventDefault();
+          if (soundRef.current) {
+            soundRef.current.enable();
+            soundRef.current.play("click");
+          }
+          snapTo(idx);
+        });
+        el.addEventListener("mouseenter", () => {
+          if (soundRef.current) {
+            soundRef.current.enable();
+            soundRef.current.play("hover");
+          }
+        });
       });
+
+      // small staggered reveal for left/right
+      const artistItems = containerRef.current.querySelectorAll(".artist");
+      artistItems.forEach((it, i) => setTimeout(() => it.classList.add("loaded"), i * 60));
+      const categoryItems = containerRef.current.querySelectorAll(".category");
+      categoryItems.forEach((it, i) => setTimeout(() => it.classList.add("loaded"), i * 60 + 200));
+
+      setLoaded(true);
     };
 
-    // ---- Hover / click sounds + nav click movement ----
-    const handleNavClick = (index) => {
-      soundManager.play("click");
-      snapToSection(index);
-    };
+    init();
 
-    artists.forEach((el, i) => {
-      el.addEventListener("pointerenter", () => soundManager.play("hover"));
-      el.addEventListener("pointerup", () => handleNavClick(i));
-    });
-
-    categories.forEach((el, i) => {
-      el.addEventListener("pointerenter", () => soundManager.play("hover"));
-      el.addEventListener("pointerup", () => handleNavClick(i));
-    });
-
-    // ---- ScrollTrigger setup ----
-    ScrollTrigger.create({
-      trigger: ".fixed-section",
-      start: "top top",
-      end: "bottom bottom",
-      pin: ".fixed-container",
-      pinSpacing: true,
-      onUpdate: (self) => {
-        if (isSnapping) return;
-        const prog = self.progress;
-        const target = Math.min(9, Math.floor(prog * 10));
-        if (target !== currentSection && !isAnimating) {
-          const nextIdx = currentSection + (target > currentSection ? 1 : -1);
-          snapToSection(nextIdx);
-        }
-      },
-    });
-
-    ScrollTrigger.refresh();
-    window.addEventListener("resize", () => ScrollTrigger.refresh());
-
-    // ✅ Make sure scrolling is possible
-    document.body.style.overflow = "auto";
-    document.body.style.touchAction = "pan-y pinch-zoom";
-
-    // ---- Cleanup ----
     return () => {
-      ScrollTrigger.getAll().forEach((st) => st.kill());
-      lenis.destroy();
-      clearInterval(interval);
+      try {
+        ScrollTrigger.getAll().forEach((t) => t.kill());
+      } catch (e) {
+        console.error(e);
+      }
+      if (lenisRef.current && lenisRef.current.destroy) lenisRef.current.destroy();
+      if (rafUpdate) gsap.ticker.remove(rafUpdate);
+      gsap.killTweensOf("*");
     };
-  }, [soundManager]);
+  }, [current]);
+
+  // helper to split words in featured headings
+  const splitWords = (text) => text.split(" ").map((w, i) => (
+    <span key={i} className="inline-block word overflow-hidden align-middle"><span className="inline-block">{w}&nbsp;</span></span>
+  ));
 
   return (
-    <div className="scroll-container">
-      <div id="loading-overlay" className="loading-overlay">
-        Loading{" "}
-        <span id="loading-counter" className="loading-counter">
-          [00]
-        </span>
-      </div>
+    <div ref={containerRef} className="w-full relative scroll-container bg-white">
+      {/* Loading overlay */}
+      {!loaded && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-white loading-overlay">
+          <div className="text-black uppercase font-medium">Loading <span className="loading-counter">[00]</span></div>
+        </div>
+      )}
 
-      <div className="fixed-section" id="fixed-section">
-        <div className="fixed-container" id="fixed-container">
-          <div className="background-container" id="background-container">
-            {IMAGES.map((src, i) => (
-              <img
-                key={i}
-                src={src}
-                alt={`Background ${i + 1}`}
-                className={`background-image${i === 0 ? " active" : ""}`}
-              />
+      <div className="fixed-section" style={{ height: "1100vh" }}>
+        <div ref={fixedContainerRef} className="fixed-container sticky top-0 left-0 w-full h-screen overflow-hidden bg-white">
+          {/* Backgrounds */}
+          <div className="absolute inset-0 z-0 background-container bg-black">
+            {BACKGROUNDS.map((src, i) => (
+              <img key={i} src={src} alt={`bg-${i}`} className={`absolute top-[-10%] left-0 w-full h-[120%] object-cover background-image ${i === 0 ? "active" : ""}`} style={{ opacity: i === 0 ? 1 : 0 }} />
             ))}
           </div>
 
-          <div className="grid-container">
-            <div className="header">
-              <div className="header-row">The Creative</div>
-              <div className="header-row">Process</div>
-            </div>
+          <div className="grid grid-cols-12 gap-4 px-8 h-full relative z-10">
+            <header className="col-span-12 pt-[5vh] text-center text-[10vw] leading-[0.8] text-white font-semibold header">The Creative<br/>Process</header>
 
-            <div className="content">
-              <div className="left-column" id="left-column">
-                {ARTISTS.map((a, i) => (
-                  <div key={i} className={`artist${i === 0 ? " active" : ""}`}>
-                    {a}
+            <main className="col-span-12 absolute left-0 top-1/2 transform -translate-y-1/2 w-full px-8 content flex justify-between items-center">
+              <div id="left-column" className="w-2/5 flex flex-col gap-1 text-left">
+                {ITEMS.map((t, i) => (
+                  <div key={i} data-index={i} className={`artist text-white uppercase cursor-pointer py-1 ${i === 0 ? "active" : ""}`}>{t}</div>
+                ))}
+              </div>
+
+              <div id="featured" className="w-1/5 flex items-center justify-center text-center feature">
+                {ITEMS.map((_, i) => (
+                  <div key={i} className={`featured-content h-[10vh] w-full absolute top-0 left-0 flex items-center justify-center ${i === 0 ? "active" : "hidden"}`}>
+                    <h3 className="uppercase text-white text-[1.5vw] tracking-tight">
+                      {splitWords(["Creative","Elements","Inner","Stillness","Deep","Knowing","True","Expression","Now","Moment"][i] || "")}
+                    </h3>
                   </div>
                 ))}
               </div>
 
-              <div className="featured" id="featured">
-                {FEATURED.map((f, i) => (
-                  <div
-                    key={i}
-                    className={`featured-content${i === 0 ? " active" : ""}`}
-                  >
-                    <h3>{f}</h3>
-                  </div>
+              <div id="right-column" className="w-2/5 flex flex-col gap-1 text-right">
+                {CATEGORIES.map((t, i) => (
+                  <div key={i} data-index={i} className={`category text-white uppercase cursor-pointer py-1 ${i === 0 ? "active" : ""}`}>{t}</div>
                 ))}
               </div>
+            </main>
 
-              <div className="right-column" id="right-column">
-                {CATEGORIES.map((c, i) => (
-                  <div key={i} className={`category${i === 0 ? " active" : ""}`}>
-                    {c}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="footer" id="footer">
-              <div className="header-row">Beyond</div>
-              <div className="header-row">Thinking</div>
-              <div className="progress-indicator">
-                <div className="progress-numbers">
+            <footer id="footer" className="col-span-12 self-end pb-[5vh] text-center text-[10vw] leading-[0.8] text-white footer font-semibold">Beyond<br/>Thinking
+              <div className="mx-auto mt-4 w-[160px] progress-indicator relative">
+                <div id="progress-fill" className="absolute top-0 left-0 h-full w-0 bg-white transition-all" />
+                <div className="progress-numbers absolute top-0 left-0 right-0 flex justify-between text-xs -translate-y-1/2">
                   <span id="current-section">01</span>
                   <span id="total-sections">10</span>
                 </div>
-                <div id="progress-fill" className="progress-fill"></div>
               </div>
-            </div>
+            </footer>
           </div>
         </div>
       </div>
 
-      <div className="end-section">
-        <p className="fin">fin</p>
-      </div>
-
-      {/* ---- Sound Toggle ---- */}
-      <button
-        id="sound-toggle"
-        className="sound-toggle disabled"
-        aria-label="Toggle sound"
-        onClick={async () => {
-          const btn = document.getElementById("sound-toggle");
-          if (!soundManager.isEnabled) {
-            await soundManager.enableAudio();
-            btn.classList.remove("disabled");
-            btn.classList.add("active");
-          } else {
-            soundManager.isEnabled = false;
-            btn.classList.add("disabled");
-            btn.classList.remove("active");
-            console.log("🔇 Audio disabled");
-          }
-        }}
-      >
-        <div className="sound-dots">
-          {[...Array(4)].map((_, i) => (
-            <div key={i} className="sound-dot"></div>
-          ))}
-        </div>
-      </button>
+      <section className="end-section h-screen flex items-center justify-center bg-white">
+        <p className="fin transform rotate-90 text-black">fin</p>
+      </section>
     </div>
   );
 }

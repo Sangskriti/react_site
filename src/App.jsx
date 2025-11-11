@@ -64,12 +64,12 @@ export default function App() {
       btn?.classList.add("active");
     };
 
-    ["click", "touchstart", "keydown"].forEach(evt =>
+    ["click", "touchstart", "keydown"].forEach((evt) =>
       document.addEventListener(evt, unlock, { once: true })
     );
 
     return () => {
-      ["click", "touchstart", "keydown"].forEach(evt =>
+      ["click", "touchstart", "keydown"].forEach((evt) =>
         document.removeEventListener(evt, unlock)
       );
     };
@@ -77,17 +77,24 @@ export default function App() {
 
   // ---- Main GSAP / Scroll logic ----
   useEffect(() => {
+    // ✅ Initialize Lenis (mobile safe)
     const lenis = new Lenis({
       duration: 1.2,
       easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
       smooth: true,
-      smoothTouch: false,
+      smoothTouch: true,
+      touchMultiplier: 1.3,
     });
-    lenis.on("scroll", ScrollTrigger.update);
-    gsap.ticker.add((time) => lenis.raf(time * 1000));
-    gsap.ticker.lagSmoothing(0);
+
+    function raf(time) {
+      lenis.raf(time);
+      requestAnimationFrame(raf);
+    }
+    requestAnimationFrame(raf);
+
     lenisRef.current = lenis;
 
+    // ---- Loading animation ----
     const overlay = document.getElementById("loading-overlay");
     const counterEl = document.getElementById("loading-counter");
     let count = 0;
@@ -122,24 +129,19 @@ export default function App() {
           },
         });
       }
-      counterEl.textContent = `[${Math.floor(count).toString().padStart(2, "0")}]`;
+      counterEl.textContent = `[${Math.floor(count)
+        .toString()
+        .padStart(2, "0")}]`;
     }, 30);
 
-    // Hover / click sounds
-    const artistEls = document.querySelectorAll(".artist");
-    const catEls = document.querySelectorAll(".category");
-    [...artistEls, ...catEls].forEach((el) => {
-      el.addEventListener("mouseenter", () => soundManager.play("hover"));
-      el.addEventListener("click", () => soundManager.play("click"));
-    });
-
-    // Scroll logic
+    // ---- Scroll logic variables ----
     const backgrounds = document.querySelectorAll(".background-image");
     const featuredContents = document.querySelectorAll(".featured-content");
     const artists = document.querySelectorAll(".artist");
     const categories = document.querySelectorAll(".category");
     const currentSectionDisplay = document.getElementById("current-section");
     const progressFill = document.getElementById("progress-fill");
+
     let currentSection = 0;
     let isAnimating = false;
     let isSnapping = false;
@@ -152,7 +154,10 @@ export default function App() {
     );
 
     const updateProgress = () => {
-      currentSectionDisplay.textContent = String(currentSection + 1).padStart(2, "0");
+      currentSectionDisplay.textContent = String(currentSection + 1).padStart(
+        2,
+        "0"
+      );
       progressFill.style.width = `${(currentSection / 9) * 100}%`;
     };
 
@@ -170,15 +175,28 @@ export default function App() {
         bg.classList.remove("previous", "active");
         if (i === newSection) {
           bg.classList.add("active");
-          gsap.fromTo(bg, { clipPath: "inset(100% 0 0 0)" }, { clipPath: "inset(0 0 0 0)", duration: 0.64, ease: "customEase" });
+          gsap.fromTo(
+            bg,
+            { clipPath: "inset(100% 0 0 0)" },
+            { clipPath: "inset(0 0 0 0)", duration: 0.64, ease: "customEase" }
+          );
         } else if (i === prev) {
           bg.classList.add("previous");
-          gsap.to(bg, { opacity: 0, duration: 0.32, ease: "customEase", onComplete: () => (isAnimating = false) });
+          gsap.to(bg, {
+            opacity: 0,
+            duration: 0.32,
+            ease: "customEase",
+            onComplete: () => (isAnimating = false),
+          });
         }
       });
 
-      artists.forEach((el, i) => gsap.to(el, { opacity: i === newSection ? 1 : 0.3, duration: 0.3 }));
-      categories.forEach((el, i) => gsap.to(el, { opacity: i === newSection ? 1 : 0.3, duration: 0.3 }));
+      artists.forEach((el, i) =>
+        gsap.to(el, { opacity: i === newSection ? 1 : 0.3, duration: 0.3 })
+      );
+      categories.forEach((el, i) =>
+        gsap.to(el, { opacity: i === newSection ? 1 : 0.3, duration: 0.3 })
+      );
     };
 
     const snapToSection = (idx) => {
@@ -193,6 +211,23 @@ export default function App() {
       });
     };
 
+    // ---- Hover / click sounds + nav click movement ----
+    const handleNavClick = (index) => {
+      soundManager.play("click");
+      snapToSection(index);
+    };
+
+    artists.forEach((el, i) => {
+      el.addEventListener("pointerenter", () => soundManager.play("hover"));
+      el.addEventListener("pointerup", () => handleNavClick(i));
+    });
+
+    categories.forEach((el, i) => {
+      el.addEventListener("pointerenter", () => soundManager.play("hover"));
+      el.addEventListener("pointerup", () => handleNavClick(i));
+    });
+
+    // ---- ScrollTrigger setup ----
     ScrollTrigger.create({
       trigger: ".fixed-section",
       start: "top top",
@@ -210,6 +245,14 @@ export default function App() {
       },
     });
 
+    ScrollTrigger.refresh();
+    window.addEventListener("resize", () => ScrollTrigger.refresh());
+
+    // ✅ Make sure scrolling is possible
+    document.body.style.overflow = "auto";
+    document.body.style.touchAction = "pan-y pinch-zoom";
+
+    // ---- Cleanup ----
     return () => {
       ScrollTrigger.getAll().forEach((st) => st.kill());
       lenis.destroy();
@@ -220,14 +263,22 @@ export default function App() {
   return (
     <div className="scroll-container">
       <div id="loading-overlay" className="loading-overlay">
-        Loading <span id="loading-counter" className="loading-counter">[00]</span>
+        Loading{" "}
+        <span id="loading-counter" className="loading-counter">
+          [00]
+        </span>
       </div>
 
       <div className="fixed-section" id="fixed-section">
         <div className="fixed-container" id="fixed-container">
           <div className="background-container" id="background-container">
             {IMAGES.map((src, i) => (
-              <img key={i} src={src} alt={`Background ${i + 1}`} className={`background-image${i === 0 ? " active" : ""}`} />
+              <img
+                key={i}
+                src={src}
+                alt={`Background ${i + 1}`}
+                className={`background-image${i === 0 ? " active" : ""}`}
+              />
             ))}
           </div>
 
@@ -240,19 +291,28 @@ export default function App() {
             <div className="content">
               <div className="left-column" id="left-column">
                 {ARTISTS.map((a, i) => (
-                  <div key={i} className={`artist${i === 0 ? " active" : ""}`}>{a}</div>
+                  <div key={i} className={`artist${i === 0 ? " active" : ""}`}>
+                    {a}
+                  </div>
                 ))}
               </div>
 
               <div className="featured" id="featured">
                 {FEATURED.map((f, i) => (
-                  <div key={i} className={`featured-content${i === 0 ? " active" : ""}`}><h3>{f}</h3></div>
+                  <div
+                    key={i}
+                    className={`featured-content${i === 0 ? " active" : ""}`}
+                  >
+                    <h3>{f}</h3>
+                  </div>
                 ))}
               </div>
 
               <div className="right-column" id="right-column">
                 {CATEGORIES.map((c, i) => (
-                  <div key={i} className={`category${i === 0 ? " active" : ""}`}>{c}</div>
+                  <div key={i} className={`category${i === 0 ? " active" : ""}`}>
+                    {c}
+                  </div>
                 ))}
               </div>
             </div>
@@ -283,7 +343,6 @@ export default function App() {
         aria-label="Toggle sound"
         onClick={async () => {
           const btn = document.getElementById("sound-toggle");
-
           if (!soundManager.isEnabled) {
             await soundManager.enableAudio();
             btn.classList.remove("disabled");
